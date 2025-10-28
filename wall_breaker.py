@@ -2,6 +2,7 @@ import pygame as pg
 import sys
 import os
 import random
+import time
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -22,6 +23,9 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
+
+# ゲームオーバーラインのY座標（ラケットの少し上）
+GAME_OVER_LINE = SCREEN_HEIGHT - 150
 
 # --- クラス定義 ---
 
@@ -131,6 +135,34 @@ class Block(pg.Rect):
 
 # --- メイン処理 ---
 
+def create_block_row(y: int) -> list[Block]:
+    """
+    指定のy座標にブロックの新しい1行を生成
+    引数 y: ブロックのy座標
+    戻り値: 生成したブロックのリスト
+    """
+    new_blocks = []
+    for x in range(10):  # 10列
+        block = Block(
+            x * (BLOCK_WIDTH + 5) + 20,  # X座標 (隙間5px, 左マージン20px)
+            y,  # 指定されたY座標
+            WHITE  # 白色で統一
+        )
+        new_blocks.append(block)
+    return new_blocks
+
+def move_blocks_down(blocks: list[Block]) -> bool:
+    """
+    全てのブロックを1段下に移動
+    引数 blocks: ブロックのリスト
+    戻り値: ゲームオーバー（ブロックが下限に達したか）
+    """
+    for block in blocks:
+        block.y += BLOCK_HEIGHT + 5  # ブロック1個分（+隙間）下に移動
+        if block.bottom >= GAME_OVER_LINE:  # ゲームオーバーライン
+            return True
+    return False
+
 def main():
     """ メインのゲームループ """
     # 講義資料 P.8 のお作法 
@@ -149,20 +181,17 @@ def main():
     ball = Ball()
     blocks = []
     
-    # ブロックの配置
-    block_colors = [RED, YELLOW, GREEN, BLUE]
-    for y in range(4): # 4行
-        for x in range(10): # 10列
-            block = Block(
-                x * (BLOCK_WIDTH + 5) + 20,  # X座標 (隙間5px, 左マージン20px)
-                y * (BLOCK_HEIGHT + 5) + 30, # Y座標 (隙間5px, 上マージン30px)
-                block_colors[y % len(block_colors)] # 色を行ごとに変える
-            )
-            blocks.append(block)
+    # 初期ブロックの配置（4行）
+    for y in range(4):
+        blocks.extend(create_block_row(y * (BLOCK_HEIGHT + 5) + 30))
 
     score = 0
     game_over = False
     game_clear = False
+    
+    # ブロック移動の管理用変数
+    last_drop_time = time.time()  # 最後にブロックを落とした時刻
+    DROP_INTERVAL = 10  # ブロックを落とす間隔（秒）
 
     # ゲームループ
     while True:
@@ -190,12 +219,30 @@ def main():
             if ball.is_out_of_bounds():
                 game_over = True
             
+            # ブロックの移動と新しい行の追加（5秒ごと）
+            current_time = time.time()
+            if current_time - last_drop_time >= DROP_INTERVAL:
+                # 全ブロックを1段下に移動
+                if move_blocks_down(blocks):
+                    game_over = True  # ブロックが下限に達したらゲームオーバー
+                else:
+                    # 最上段に新しい行を追加
+                    blocks.extend(create_block_row(30))  # 上端のY座標（30px）
+                last_drop_time = current_time
+
             # ゲームクリア判定
             if not blocks: # ブロックがなくなったら
                 game_clear = True
 
         # 描画処理
         screen.fill(BLACK) # 背景を黒で塗りつぶし
+        
+        # ゲームオーバーラインを描画（点線で表示）
+        dash_length = 15  # 点線の長さ
+        gap_length = 10   # 点線の間隔
+        for x in range(0, SCREEN_WIDTH, dash_length + gap_length):
+            pg.draw.line(screen, RED, (x, GAME_OVER_LINE), (x + dash_length, GAME_OVER_LINE), 2)
+            
         paddle.draw(screen)
         ball.draw(screen)
         for block in blocks:
