@@ -3,6 +3,7 @@ import sys
 import os
 import random
 import time
+import math  # 標準のmathモジュールを追加
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,7 +28,53 @@ YELLOW = (255, 255, 0)
 # ゲームオーバーラインのY座標（ラケットの少し上）
 GAME_OVER_LINE = SCREEN_HEIGHT - 150
 
+# パーティクルの設定
+PARTICLE_LIFETIME = 30  # パーティクルの寿命（フレーム数）
+PARTICLE_SPEED = 5     # パーティクルの初期速度
+
+# --- サウンド設定 ---
+def load_sound():
+    """効果音をロード"""
+    pg.mixer.init()  # mixer（音声周り）の初期化
+    try:
+        sound = pg.mixer.Sound("sound/break.mp3")  # 効果音をロード
+        sound.set_volume(0.4)  # 音量を40%に設定
+        return sound
+    except:
+        print("効果音ファイルの読み込みに失敗しました")
+        return None
+
 # --- クラス定義 ---
+
+class Particle:
+    """パーティクルエフェクトのクラス"""
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.lifetime = PARTICLE_LIFETIME
+        # ランダムな方向と速度を設定
+        angle = random.uniform(0, 2 * math.pi)  # ランダムな角度（0-2π）
+        speed = random.uniform(2, PARTICLE_SPEED)
+        self.vx = speed * math.cos(angle)
+        self.vy = speed * math.sin(angle)
+        self.size = random.randint(2, 4)  # パーティクルのサイズ
+
+    def update(self):
+        """パーティクルの位置と寿命を更新"""
+        self.x += self.vx
+        self.y += self.vy
+        self.lifetime -= 1
+        # 徐々に透明になる
+        alpha = int(255 * (self.lifetime / PARTICLE_LIFETIME))
+        self.color = (*self.color[:3], alpha)
+        return self.lifetime > 0
+
+    def draw(self, screen):
+        """パーティクルを描画"""
+        particle_surface = pg.Surface((self.size * 2, self.size * 2), pg.SRCALPHA)
+        pg.draw.circle(particle_surface, self.color, (self.size, self.size), self.size)
+        screen.blit(particle_surface, (int(self.x) - self.size, int(self.y) - self.size))
 
 class Paddle:
     """ ラケット（操作対象）のクラス """
@@ -73,7 +120,7 @@ class Ball:
         self.vy = -5
         self.speed = 5
 
-    def update(self, paddle, blocks):
+    def update(self, paddle, blocks, particles, break_sound=None):
         """ ボールの移動と衝突判定 """
         self.rect.move_ip(self.vx, self.vy)
 
@@ -109,6 +156,16 @@ class Ball:
             # ボールの反射処理（簡易的にY方向のみ反転）
             # 実際にはブロックの上下左右どこに当たったか判定すべきだが簡略化
             self.vy *= -1
+            
+            # パーティクルエフェクトの生成（衝突したブロックの中心から）
+            for _ in range(10):  # 10個のパーティクルを生成
+                particles.append(
+                    Particle(block.centerx, block.centery, (*WHITE, 255))
+                )
+            
+            # 効果音の再生
+            if break_sound is not None:
+                break_sound.play()
             
             return True # ブロックに当たった
         
@@ -175,11 +232,15 @@ def main():
     pg.display.set_caption("ブロック崩し")
     clock = pg.time.Clock()
     font = pg.font.Font(None, 50) # スコア表示用フォント
+    
+    # 効果音のロード
+    break_sound = load_sound()
 
     # オブジェクトのインスタンス化
     paddle = Paddle()
     ball = Ball()
     blocks = []
+    particles = []  # パーティクルのリストを追加
     
     # 初期ブロックの配置（4行）
     for y in range(4):
@@ -212,8 +273,11 @@ def main():
             
             # オブジェクトの更新
             paddle.update(keys)
-            if ball.update(paddle, blocks): # ブロックに当たったら
+            if ball.update(paddle, blocks, particles, break_sound): # ブロックに当たったら
                 score += 10 # スコア加算
+
+            # パーティクルの更新
+            particles[:] = [p for p in particles if p.update()]
 
             # ゲームオーバー判定
             if ball.is_out_of_bounds():
@@ -247,6 +311,10 @@ def main():
         ball.draw(screen)
         for block in blocks:
             block.draw(screen)
+        
+        # パーティクルの描画
+        for particle in particles:
+            particle.draw(screen)
 
         # スコア表示
         score_text = font.render(f"SCORE: {score}", True, WHITE)
