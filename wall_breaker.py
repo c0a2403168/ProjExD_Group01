@@ -24,6 +24,10 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
+# ★担当アイテムの色
+PINK = (255, 192, 203) # ラケット巨大化
+ORANGE = (255, 165, 0) # 残機増加
+CYAN = (0, 255, 255)   # ボール増加
 
 # ゲームオーバーラインのY座標（ラケットの少し上）
 GAME_OVER_LINE = SCREEN_HEIGHT - 150
@@ -88,14 +92,13 @@ class Particle:
 class Paddle:
     """ ラケット（操作対象）のクラス """
     def __init__(self):
-        # ラケットのRectを画面中央下に作成
         self.rect = pg.Rect(
             (SCREEN_WIDTH - PADDLE_WIDTH) // 2, 
             SCREEN_HEIGHT - PADDLE_HEIGHT - 20, 
             PADDLE_WIDTH, 
             PADDLE_HEIGHT
         )
-        self.speed = 10 # 移動速度
+        self.speed = 10
 
     def update(self, keys):
         """ キー入力に基づきラケットを移動 """
@@ -104,7 +107,6 @@ class Paddle:
         if keys[pg.K_d]:
             self.rect.move_ip(self.speed, 0)
         
-        # 画面外に出ないように制限
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > SCREEN_WIDTH:
@@ -115,7 +117,7 @@ class Paddle:
         pg.draw.rect(screen, BLUE, self.rect)
 
 class Ball:
-    """ ボールのクラス """
+    """ ボールのクラス (基本機能) """
     def __init__(self):
         # ... (既存の rect, vx, vy, speed の設定はそのまま) ...
         self.rect = pg.Rect(
@@ -139,24 +141,25 @@ class Ball:
         """ ボールの移動と衝突判定 """
         self.rect.move_ip(self.vx, self.vy)
 
-        # ... (壁との衝突判定 (上) はそのまま) ...
+        # 壁との衝突 (上)
         if self.rect.top < 0:
             self.vy *= -1 
             self.rect.top = 0
 
-        # ... (壁との衝突判定 (左・右) はそのまま) ...
+        # 壁との衝突 (左・右)
         if self.rect.left < 0 or self.rect.right > SCREEN_WIDTH:
-            self.vx *= -1
+            self.vx *= -1 
             if self.rect.left < 0: self.rect.left = 0
             if self.rect.right > SCREEN_WIDTH: self.rect.right = SCREEN_WIDTH
 
-        # ラケットとの衝突判定
+        # ラケットとの衝突
         if self.rect.colliderect(paddle.rect):
             self.vy *= -1 
             self.rect.bottom = paddle.rect.top 
             
+            # ラケット幅の変動に対応 (item1)
             center_diff = self.rect.centerx - paddle.rect.centerx
-            self.vx = (center_diff / (PADDLE_WIDTH / 2)) * self.speed
+            self.vx = (center_diff / (paddle.rect.width / 2)) * self.speed 
             if abs(self.vx) < 1:
                 self.vx = 1 if self.vx >= 0 else -1
 
@@ -208,7 +211,7 @@ class Ball:
         
         # --- ▼ 戻り値を変更 ▼ ---
         return False, None # ブロックに当たらなかった
-        # --- ▲ ---------------- ▲ ---
+
 
     def draw(self, screen):
         """ ボールを画面に描画 (円形) """
@@ -254,10 +257,90 @@ class Block(pg.Rect):
     def __init__(self, x, y, color):
         super().__init__(x, y, BLOCK_WIDTH, BLOCK_HEIGHT)
         self.color = color
+        # (ここに hp や is_item_block などの属性が追加される)
 
     def draw(self, screen):
         """ ブロックを画面に描画 """
         pg.draw.rect(screen, self.color, self)
+
+class item1:
+    """
+    担当アイテムの効果発動とタイマー管理を行うクラス
+    (ラケット巨大化、残機増加、ボール増加)
+    """
+    def __init__(self, paddle_original_width):
+        self.paddle_extend_active = False
+        self.extend_start_time = 0
+        self.EXTEND_DURATION = 10000 # 10秒 = 10000 ms
+        self.original_width = paddle_original_width
+        self.extended_width = int(paddle_original_width * 1.5) 
+
+    def activate(self, effect_name: str, balls: list, paddle: Paddle) -> int:
+        """
+        アイテム名(effect_name)に基づき、効果を発動する。
+        :return: 残機(life)の増減量 (int)
+        """
+        if effect_name == "extend_paddle": # ラケット巨大化
+            self.paddle_extend_active = True
+            self.extend_start_time = pg.time.get_ticks()
+            center_x = paddle.rect.centerx
+            paddle.rect.width = self.extended_width
+            paddle.rect.centerx = center_x
+            return 0 
+
+        elif effect_name == "increase_life": # 残機増加
+            return 1 # mainループ側でlifeを1増やす
+
+        elif effect_name == "increase_ball": # ボール増加
+            balls.append(Ball()) 
+            return 0
+        
+        return 0 # 担当外のアイテム
+
+    def update(self, paddle: Paddle):
+        """
+        毎フレーム呼び出す。ラケット巨大化のタイマーを管理する。
+        """
+        if not self.paddle_extend_active:
+            return
+        current_time = pg.time.get_ticks()
+        elapsed_time = current_time - self.extend_start_time
+        if elapsed_time > self.EXTEND_DURATION:
+            self.paddle_extend_active = False
+            center_x = paddle.rect.centerx
+            paddle.rect.width = self.original_width
+            paddle.rect.centerx = center_x
+
+class Item(pg.Rect):
+    """ 落下アイテムの共通クラス (pg.Rectを継承) """
+    def __init__(self, x, y, item_type):
+        self.item_type = item_type # "extend_paddle" など
+        
+        # 担当アイテムの色分け
+        if self.item_type == "extend_paddle":
+            self.color = PINK 
+        elif self.item_type == "increase_life":
+            self.color = ORANGE 
+        elif self.item_type == "increase_ball":
+            self.color = CYAN 
+            
+        self.speed = 3 # 落下速度
+        item_width = 20
+        item_height = 20
+        super().__init__(x - item_width // 2, y - item_height // 2, item_width, item_height)
+
+    def update(self):
+        """ アイテムを下に移動させる """
+        self.move_ip(0, self.speed)
+
+    def draw(self, screen):
+        """ アイテムを描画する（色分け） """
+        pg.draw.rect(screen, self.color, self)
+
+    def check_collision(self, paddle_rect):
+        """ ラケットとの衝突を判定する """
+        return self.colliderect(paddle_rect)
+
 
 
 class Item2(pg.Rect):
@@ -292,7 +375,6 @@ class Item2(pg.Rect):
         return self.colliderect(paddle_rect)
 
 # --- メイン処理 ---
-
 def create_block_row(y: int) -> list[Block]:
     """
     指定のy座標にブロックの新しい1行を生成
@@ -323,10 +405,12 @@ def move_blocks_down(blocks: list[Block]) -> bool:
 
 def main():
     """ メインのゲームループ """
-    # ... (初期化、画面設定、フォント設定などはそのまま) ...
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+    # Pygameの初期化
     pg.init()
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pg.display.set_caption("ブロック崩し")
+    pg.display.set_caption("ウォールブレイカー（担当分 落下テスト版）")
     clock = pg.time.Clock()
     font = pg.font.Font(None, 50) 
     
@@ -335,106 +419,157 @@ def main():
 
     # オブジェクトのインスタンス化
     paddle = Paddle()
-    ball = Ball()
+    
+    # ボールはリスト管理
+    balls = [Ball()] 
+    
+    # 落下アイテムリスト
+    items = [] 
+    
     blocks = []
+    
+    # 担当アイテムマネージャー
+    item_manager_ishii = item1(PADDLE_WIDTH) 
     particles = []  # パーティクルのリストを追加
     # --- ▼ アイテムリストを追加 ▼ ---
     items = [] # 落下中のアイテムを管理するリスト
     # --- ▲ ------------------- ▲ ---
-    
+
     # ... (ブロックの配置 はそのまま) ...
     block_colors = [RED, YELLOW, GREEN, BLUE]
     for y in range(4): 
         blocks.extend(create_block_row(y * (BLOCK_HEIGHT + 5) + 30))
 
     score = 0
+    life = 3
     game_over = False
     game_clear = False
     
     # ブロック移動の管理用変数
     last_drop_time = time.time()  # 最後にブロックを落とした時刻
     DROP_INTERVAL = 10  # ブロックを落とす間隔（秒）
+    
+    # (ダミー) 担当分のアイテムのみ抽選
+    MY_ITEM_TYPES = [
+        "extend_paddle", # item1
+        "increase_life", # item1
+        "increase_ball", # item1
+        "large_ball",   # item2
+        "penetrate"     # item2
+    ]
 
-    # ゲームループ
+    # --- ゲームループ ---
     while True:
-        # ... (イベント処理、リスタート処理はそのまま) ...
+        # --- イベント処理 ---
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 pg.quit()
                 sys.exit()
             if event.type == pg.KEYDOWN:
                 if event.key == pg.K_r and (game_over or game_clear):
-                    main() 
+                    main() # ゲームリスタート
                     return
+                
+                # --- デバッグキー (コメントアウト) ---
+                # '1'キーでラケット巨大化アイテムを強制ドロップ
+                # if event.key == pg.K_1:
+                #     item = Item(SCREEN_WIDTH // 2, 0, "extend_paddle")
+                #     items.append(item)
+                # '2'キーで残機増加アイテムを強制ドロップ
+                # elif event.key == pg.K_2:
+                #     item = Item(SCREEN_WIDTH // 2, 0, "increase_life")
+                #     items.append(item)
+                # '3'キーでボール増加アイテムを強制ドロップ
+                # elif event.key == pg.K_3:
+                #     item = Item(SCREEN_WIDTH // 2, 0, "increase_ball")
+                #     items.append(item)
 
         if not game_over and not game_clear:
             keys = pg.key.get_pressed()
-            
-            # オブジェクトの更新
             paddle.update(keys)
-            
-            # --- ▼ Ball.updateの戻り値の変更に対応 ▼ ---
+            # すべてのボールを更新
+        for ball in balls[:]:
+            # ブロック判定＋パーティクル＆音
             block_hit, destroyed_block = ball.update(paddle, blocks, particles, sounds.get("break"))
 
-            if block_hit: # ブロックに当たったら
-                score += 10 # スコア加算
+            if block_hit:  # ブロックに当たったら
+                score += 10  # スコア加算
 
-                # --- ▼ アイテムドロップ処理 ▼ ---
-                # 30%の確率でアイテムをドロップ (確率は調整可能)
+                # --- アイテムドロップ処理 (抽選処理のダミー) ---
+                # 30%の確率で担当アイテムをドロップ
                 if random.random() < 0.3: 
-                    # 貫通か巨大化をランダムに選ぶ
-                    item_type = random.choice(["penetrate", "large_ball"])
-                    # 壊れたブロックの中心位置にアイテムを生成
-                    item = Item2(destroyed_block.centerx, destroyed_block.centery, item_type)
-                    items.append(item)
-                # --- ▲ ----------------------- ▲ ---
-            # --- ▲ -------------------------------- ▲ ---
+                    item_type = random.choice(MY_ITEM_TYPES)
+                                    
+                #item_typeに応じて生成するクラスを分ける
+                    if item_type in ["penetrate", "large_ball"]:
+                        item = Item2(destroyed_block.centerx, destroyed_block.centery, item_type)
+                    else:
+                        item = Item(destroyed_block.centerx, destroyed_block.centery, item_type)
+                        
+                    items.append(item) # アイテムをリストに追加
+            
 
-            # --- ▼ アイテムの更新とラケットとの衝突判定 ▼ ---
-            for item in items[:]: # リストのコピーをイテレート（削除処理のため）
-                item.update() # アイテムを落下
+        # --- 落下アイテムの更新とラケットとの衝突判定 ---
+        for item in items[:]: # リストのコピーをイテレート
+            item.update() # アイテムを落下
                 
-                # ラケットと衝突したら
-                if item.check_collision(paddle.rect):
-                    if item.item_type == "penetrate":
-                        ball.set_penetrate(True) # ボールを貫通状態に
-                    elif item.item_type == "large_ball":
-                        ball.set_size(True) # ボールを巨大化
+            # ラケットと衝突したら
+            if item.check_collision(paddle.rect):
+                item_type = item.item_type # "extend_paddle" などを取得
                     
-                    items.remove(item) # アイテムをリストから削除
+                # --- item1の効果発動 ---
+                life_change = item_manager_ishii.activate(item_type, balls, paddle)
+                life += life_change # 残機を更新
                 
-                # 画面外に出たら削除
-                elif item.top > SCREEN_HEIGHT:
-                    items.remove(item)
-            # --- ▲ -------------------------------------- ▲ ---
+                # --- item2の効果発動 ---
+                if item_type in ["large_ball", "penetrate"]:
+                    for ball in balls:
+                        if item_type == "large_ball":
+                            ball.set_size(True) # 巨大化
+                        elif item_type == "penetrate":
+                            ball.set_penetrate(True) # 貫通化 
 
-            # パーティクルの更新
-            particles[:] = [p for p in particles if p.update()]
+                items.remove(item) # アイテムをリストから削除
+                
+            # 画面外に出たら削除
+            elif item.top > SCREEN_HEIGHT:
+                items.remove(item)
+            
+        # ラケット巨大化タイマーの更新
+        item_manager_ishii.update(paddle)
+            
+        # 画面外に落ちたボールをリストから削除
+        balls = [ball for ball in balls if not ball.is_out_of_bounds()]
 
-            # ゲームオーバー判定
-            if ball.is_out_of_bounds():
-                game_over = True
+        # ボールが0個になったら残機を減らす
+        if not balls and not game_clear: 
+            life -= 1
+            if life > 0:
+                balls.append(Ball()) 
+                paddle = Paddle() 
+            else:
+                if not game_over: 
+                    game_over = True 
+                    if sounds.get("defeat"):
+                        sounds["defeat"].play()
+            
+        # ブロックの移動と新しい行の追加（5秒ごと）
+        current_time = time.time()
+        if current_time - last_drop_time >= DROP_INTERVAL:
+            # 全ブロックを1段下に移動
+            if move_blocks_down(blocks):
+                game_over = True  # ブロックが下限に達したらゲームオーバー
                 # ゲームオーバー効果音を再生
                 if sounds.get("defeat"):
                     sounds["defeat"].play()
-            
-            # ブロックの移動と新しい行の追加（5秒ごと）
-            current_time = time.time()
-            if current_time - last_drop_time >= DROP_INTERVAL:
-                # 全ブロックを1段下に移動
-                if move_blocks_down(blocks):
-                    game_over = True  # ブロックが下限に達したらゲームオーバー
-                    # ゲームオーバー効果音を再生
-                    if sounds.get("defeat"):
-                        sounds["defeat"].play()
-                else:
-                    # 最上段に新しい行を追加
-                    blocks.extend(create_block_row(30))  # 上端のY座標（30px）
-                last_drop_time = current_time
+            else:
+                # 最上段に新しい行を追加
+                blocks.extend(create_block_row(30))  # 上端のY座標（30px）
+            last_drop_time = current_time
 
-            # ゲームクリア判定
-            if not blocks: # ブロックがなくなったら
-                game_clear = True
+        # ゲームクリア判定
+        if not blocks:
+            game_clear = True
 
         # 描画処理
         screen.fill(BLACK) 
@@ -446,13 +581,18 @@ def main():
             pg.draw.line(screen, RED, (x, GAME_OVER_LINE), (x + dash_length, GAME_OVER_LINE), 2)
             
         paddle.draw(screen)
-        ball.draw(screen)
+        
+        for ball in balls: # すべてのボールを描画
+            ball.draw(screen)
         for block in blocks:
             block.draw(screen)
         
         # パーティクルの描画
-        for particle in particles:
-            particle.draw(screen)
+        for particle in particles[:]:
+            if particle.update():
+                particle.draw(screen)
+            else:
+                particles.remove(particle)
 
         # --- ▼ アイテムの描画 ▼ ---
         for item in items:
@@ -462,6 +602,9 @@ def main():
         # ... (スコア表示、ゲームオーバー / クリア表示 はそのまま) ...
         score_text = font.render(f"SCORE: {score}", True, WHITE)
         screen.blit(score_text, (10, 10))
+        life_text = font.render(f"LIFE: {life}", True, WHITE)
+        screen.blit(life_text, (SCREEN_WIDTH - life_text.get_width() - 10, 10))
+
 
         if game_over:
             msg_text = font.render("GAME OVER", True, RED)
